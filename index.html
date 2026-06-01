@@ -102,6 +102,7 @@ canvas#cnv { border: 1px solid var(--border); border-radius: 4px; display: block
     <button class="btn mode-btn active" id="mb-roi" onclick="setMode('roi')">분석 영역</button>
     <button class="btn mode-btn" id="mb-ref" onclick="setMode('ref')">레퍼런스 너비</button>
     <button class="btn mode-btn" id="mb-zoom" onclick="setMode('zoom')">🔍 줌</button>
+    <button class="btn mode-btn" id="mb-rotate" onclick="rotateImage()" title="90° 회전">↻ 회전</button>
     <button class="btn btn-danger" onclick="resetCanvas()" style="margin-left:auto;font-size:11px">초기화</button>
   </div>
 
@@ -219,6 +220,7 @@ let startX, startY; // 드래그 시작점 (이미지 원본 좌표)
 // roi, refLine 은 모두 이미지 원본(img) 좌표계로 저장
 let roi=null, refLine=null;
 let zoomScale=1, panX=0, panY=0, panStartMouse=null, panStartPan=null;
+let rotateAngle=0; // 0 / 90 / 180 / 270 (도)
 let currentFile='', groups=[], currentGroupIdx=-1, viscChart=null, modalCallback=null;
 
 const cnv=document.getElementById('cnv'), ctx=cnv.getContext('2d');
@@ -253,7 +255,20 @@ function canvasXY(e){
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
-// ── 이미지 로드 / 캔버스 피팅 ───────────────────────────
+// ── 회전 ─────────────────────────────────────────────────
+function rotateImage(){
+  if(!img){ addLog('⚠ 이미지를 먼저 불러오세요.'); return; }
+  rotateAngle=(rotateAngle+90)%360;
+  roi=null; refLine=null; resetStats();
+  fitCanvas(); render();
+  addLog(`↻ ${rotateAngle}° 회전`);
+}
+
+// 회전 각도를 고려한 이미지의 논리적 너비/높이 반환
+function imgW(){ return (rotateAngle===90||rotateAngle===270) ? img.height : img.width; }
+function imgH(){ return (rotateAngle===90||rotateAngle===270) ? img.width  : img.height; }
+
+
 function loadImage(e){
   const file=e.target.files[0]; if(!file)return;
   const doLoad=()=>{
@@ -263,7 +278,7 @@ function loadImage(e){
     reader.onload=ev=>{
       const i=new Image();
       i.onload=()=>{
-        img=i; zoomScale=1; panX=0; panY=0; roi=null; refLine=null;
+        img=i; zoomScale=1; panX=0; panY=0; roi=null; refLine=null; rotateAngle=0;
         resetStats(); fitCanvas(); render();
         addLog(`✅ 로드: ${file.name}`);
       };
@@ -282,12 +297,10 @@ function loadImage(e){
 function fitCanvas(){
   if(!img)return;
   const maxW=document.getElementById('cwrap').clientWidth||760;
-  const ratio=Math.min(maxW/img.width, 400/img.height, 1);
-  cnv.width=Math.round(img.width*ratio);
-  cnv.height=Math.round(img.height*ratio);
-  // fitCanvas 후 줌=1, pan=0 이면 canvas 1px = img 1/ratio px
-  // 이미지 전체를 딱 맞게 표시하려면 초기 scale = ratio 로 세팅
-  // (원본 이미지 좌표 기준으로 roi/ref 를 저장하므로 일관성 유지)
+  const iw=imgW(), ih=imgH();
+  const ratio=Math.min(maxW/iw, 400/ih, 1);
+  cnv.width=Math.round(iw*ratio);
+  cnv.height=Math.round(ih*ratio);
   zoomScale=ratio; panX=0; panY=0;
 }
 
@@ -301,10 +314,21 @@ function render(){
     ctx.textAlign='left'; return;
   }
 
-  // 이미지 그리기 — 원본 픽셀 좌표계 기준 transform
+  // 이미지 그리기 — 회전 + pan/zoom 적용
   ctx.save();
   ctx.translate(panX, panY);
   ctx.scale(zoomScale, zoomScale);
+  // 회전: 논리 원점(0,0) 기준으로 회전 후 이미지가 (0,0)~(imgW,imgH)에 오도록 이동
+  if(rotateAngle===90){
+    ctx.translate(img.height, 0);
+    ctx.rotate(Math.PI/2);
+  } else if(rotateAngle===180){
+    ctx.translate(img.width, img.height);
+    ctx.rotate(Math.PI);
+  } else if(rotateAngle===270){
+    ctx.translate(0, img.width);
+    ctx.rotate(-Math.PI/2);
+  }
   ctx.drawImage(img, 0, 0, img.width, img.height);
   ctx.restore();
 
@@ -541,7 +565,7 @@ function exportCSVFallback(){
   a.download=`viscometry_${new Date().toISOString().slice(0,10)}.csv`;a.click();
   setStatus('✅ 다운로드 폴더에 저장되었습니다.');
 }
-function resetCanvas(){roi=null;refLine=null;zoomScale=1;panX=0;panY=0;if(img){fitCanvas();}resetStats();render();addLog('🔄 초기화');}
+function resetCanvas(){roi=null;refLine=null;zoomScale=1;panX=0;panY=0;rotateAngle=0;if(img){fitCanvas();}resetStats();render();addLog('🔄 초기화');}
 function resetStats(){['sv-wref','sv-wsmp','sv-ratio','sv-eta'].forEach(id=>document.getElementById(id).textContent='—');document.getElementById('sv-etaref').innerHTML='1.00<span class="stat-unit">mPa·s</span>';}
 function addLog(msg){const log=document.getElementById('log');const d=document.createElement('div');d.className='log-entry';d.textContent=`[${new Date().toLocaleTimeString('ko-KR')}] ${msg}`;log.insertBefore(d,log.firstChild);}
 function openModal(title,desc,cb){document.getElementById('modal-title').textContent=title;document.getElementById('modal-desc').textContent=desc;document.getElementById('modal-input').value='';document.getElementById('modal').style.display='block';modalCallback=cb;setTimeout(()=>document.getElementById('modal-input').focus(),100);}
